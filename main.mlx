@@ -1,0 +1,106 @@
+%% SECTION 1: SETUP AND CLEANUP
+clc;
+clear;
+close all;  % ✅ Close any open figures to free up memory
+
+trainFolder = fullfile('fer2013', 'train');
+testFolder = fullfile('fer2013', 'test');
+
+%% SECTION 2: LOAD IMAGE DATA
+imdsTrain = imageDatastore(trainFolder, ...
+    'IncludeSubfolders', true, ...
+    'LabelSource', 'foldernames');
+
+imdsTest = imageDatastore(testFolder, ...
+    'IncludeSubfolders', true, ...
+    'LabelSource', 'foldernames');
+
+%% SECTION 3: SAFE RESIZING + GRAYSCALE FUNCTION
+inputSize = [48 48];
+resizeAndGray = @(filename) imresize(convertToGray(imread(filename)), inputSize);
+imdsTrain.ReadFcn = resizeAndGray;
+imdsTest.ReadFcn = resizeAndGray;
+
+function imgOut = convertToGray(imgIn)
+    if size(imgIn, 3) == 3
+        imgOut = rgb2gray(imgIn);
+    else
+        imgOut = imgIn;
+    end
+end
+
+%% SECTION 4: DISPLAY DATA DISTRIBUTION
+disp('Training data label count:');
+disp(countEachLabel(imdsTrain));
+
+%% SECTION 5: DEFINE CNN LAYERS
+layers = [
+    imageInputLayer([48 48 1])
+
+    convolution2dLayer(3, 8, 'Padding', 'same')
+    batchNormalizationLayer
+    reluLayer
+
+    maxPooling2dLayer(2, 'Stride', 2)
+
+    convolution2dLayer(3, 16, 'Padding', 'same')
+    batchNormalizationLayer
+    reluLayer
+
+    maxPooling2dLayer(2, 'Stride', 2)
+
+    convolution2dLayer(3, 32, 'Padding', 'same')
+    batchNormalizationLayer
+    reluLayer
+
+    fullyConnectedLayer(7)
+    softmaxLayer
+    classificationLayer
+];
+
+%% SECTION 6: TRAINING OPTIONS (No Plot Window)
+options = trainingOptions('sgdm', ...
+    'MaxEpochs', 10, ...
+    'InitialLearnRate', 0.001, ...
+    'Shuffle', 'every-epoch', ...
+    'ValidationData', imdsTest, ...
+    'ValidationFrequency', 30, ...
+    'Verbose', false, ...
+    'Plots', 'none');  % ✅ No training-progress plot
+
+%% SECTION 7: TRAIN THE NETWORK
+disp('Training the network...');
+net = trainNetwork(imdsTrain, layers, options);
+disp('Training complete.');
+
+%% SECTION 8: SAVE MODEL
+save('expressionNet.mat', 'net', 'layers', 'options');
+disp('Model saved to expressionNet.mat');
+
+%% SECTION 9: USER SELECT IMAGE FOR PREDICTION
+disp('--- Emotion Detection from Custom Image ---');
+[filename, pathname] = uigetfile({'*.jpg;*.png;*.jpeg','Image Files'}, 'Select a face image');
+
+if isequal(filename, 0)
+    disp('No image selected. Exiting...');
+    return;
+end
+
+filePath = fullfile(pathname, filename);
+userImg = imread(filePath);
+
+if size(userImg, 3) == 3
+    userImg = rgb2gray(userImg);
+end
+userImgResized = imresize(userImg, inputSize);
+
+%% SECTION 10: PREDICT EMOTION + DISPLAY RESULT
+[label, scores] = classify(net, userImgResized);
+confidence = max(scores) * 100;
+
+figure(1); clf;  % ✅ Reuse same figure window
+imshow(userImgResized);
+title(sprintf('Predicted Emotion: %s (%.2f%%)', char(label), confidence));
+
+disp(['Predicted Emotion: ', char(label)]);
+disp(['Confidence: ', num2str(confidence, '%.2f'), '%']);
